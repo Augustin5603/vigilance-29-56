@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Carte de vigilance — Finistère (29) & Morbihan (56)</title>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    header { padding: .6rem .9rem; background: #0f172a; color: #e5e7eb; display:flex; align-items:center; gap: .8rem; flex-wrap: wrap; }
+    header h1 { font-size: 1.05rem; margin: 0; font-weight: 700; }
+    header small { opacity: .8; }
+    .pill { padding: .25rem .6rem; border-radius: 999px; background: #111827; color:#d1d5db; font-size:.75rem; }
+    .toolbar { display:flex; align-items:center; gap:.5rem; flex-wrap: wrap; margin-left:auto; }
+    .toolbar button, .toolbar label { font: inherit; }
+    .btn { border: 1px solid #e5e7eb; background: #ffffff; padding: .45rem .7rem; border-radius: .6rem; cursor:pointer; }
+    .btn:hover { background:#f3f4f6; }
+    .btn.primary { background:#111827; color:#fff; border-color:#111827; }
+    .btn.primary:hover { filter:brightness(1.1); }
+    .btn.ghost { background: transparent; color:#e5e7eb; border-color:#374151; }
+    .btn.ghost:hover { background:#111827; }
+    .sep { width:1px; height:26px; background:#374151; margin:0 .4rem; }
+
+    #map { width: 100%; height: 100%; }
+
+    /* Legend & side panel */
+    .legend, .sidepanel {
+      position: absolute; z-index: 999; background: #fff; border:1px solid #e5e7eb; border-radius: .8rem; box-shadow: 0 4px 16px rgba(0,0,0,.08);
+    }
+    .legend { left: 12px; bottom: 12px; padding: .6rem .8rem; font-size: .9rem; }
+    .legend .row { display:flex; align-items:center; gap:.5rem; margin:.15rem 0; }
+    .swatch { width: 16px; height: 16px; border-radius:3px; border:1px solid #11182722; }
+    .sidepanel { right: 12px; top: 84px; width: 320px; max-width: calc(100% - 24px); }
+    .sidepanel header { background:#ffffff; color:#111827; border-bottom:1px solid #e5e7eb; }
+    .sidepanel .content { padding:.8rem; display:grid; gap:.6rem; }
+    .kv { display:grid; grid-template-columns: 1fr auto; gap:.4rem; font-size:.9rem; color:#374151; }
+    .muted { color:#6b7280; font-size:.85rem; }
+    .search { display:flex; gap:.4rem; }
+    .search input { flex:1; padding:.45rem .6rem; border:1px solid #e5e7eb; border-radius:.6rem; }
+
+    .popup-actions button { font: inherit; padding:.3rem .5rem; margin:.15rem; border-radius:.4rem; border:1px solid #e5e7eb; cursor:pointer; }
+    .popup-actions button:hover { background:#f3f4f6; }
+
+    /* Mobile tweaks */
+    @media (max-width: 640px){ .sidepanel{ top:auto; bottom:12px; } header{ gap:.5rem; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Carte de vigilance — 29 & 56</h1>
+      <span class="pill" id="communeCount">Chargement…</span>
+      <span class="pill" id="lastUpdate">Maj : —</span>
+      <div class="toolbar">
+        <div class="search">
+          <input id="searchBox" type="search" placeholder="Rechercher une commune… (ex: Quimper)">
+          <button class="btn" id="btnSearch">Chercher</button>
+        </div>
+        <div class="sep"></div>
+        <button class="btn" id="btnSetAllVert">Tout en vert</button>
+        <button class="btn" id="btnExport">Exporter JSON</button>
+        <label class="btn" for="fileImport">Importer JSON</label>
+        <input id="fileImport" type="file" accept="application/json" style="display:none;" />
+        <button class="btn ghost" id="btnReset">Réinitialiser</button>
+      </div>
+    </header>
+    <div id="map"></div>
+  </div>
+
+  <div class="legend">
+    <div class="row"><div class="swatch" style="background:#4CAF50"></div> Vert — pas de danger</div>
+    <div class="row"><div class="swatch" style="background:#FFEB3B"></div> Jaune — soyez attentifs</div>
+    <div class="row"><div class="swatch" style="background:#FF9800"></div> Orange — soyez très vigilants</div>
+    <div class="row"><div class="swatch" style="background:#F44336"></div> Rouge — vigilance absolue</div>
+  </div>
+
+  <div class="sidepanel" id="panel" hidden>
+    <header class="hdr" style="display:flex; align-items:center; justify-content:space-between; padding:.6rem .8rem;">
+      <strong id="panelTitle">Commune</strong>
+      <button class="btn" id="panelClose">Fermer</button>
+    </header>
+    <div class="content">
+      <div class="kv"><span>Code INSEE</span><strong id="pInsee">—</strong></div>
+      <div class="kv"><span>Nom</span><strong id="pNom">—</strong></div>
+      <div class="kv"><span>Niveau</span><strong id="pLevel">—</strong></div>
+      <div class="muted">Cliquez un niveau pour l'appliquer à la commune sélectionnée :</div>
+      <div class="popup-actions">
+        <button data-level="vert">Vert</button>
+        <button data-level="jaune">Jaune</button>
+        <button data-level="orange">Orange</button>
+        <button data-level="rouge">Rouge</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- UTIL ---
+    const COLORS = { vert: "#4CAF50", jaune: "#FFEB3B", orange: "#FF9800", rouge: "#F44336" };
+    const LEVELS = Object.keys(COLORS);
+
+    const getInsee = f => (f.properties.code_insee || f.properties.code || f.properties.insee || f.properties.INSEE || f.properties.insee_com || f.properties.codgeo || "").toString();
+    const getName  = f => (f.properties.nom || f.properties.NOM || f.properties.nom_commune || f.properties.libgeo || f.properties.name || "").toString();
+
+    const fmtDateTime = (d=new Date()) => new Intl.DateTimeFormat('fr-FR', { dateStyle:'medium', timeStyle:'short' }).format(d);
+
+    // Try load/save to localStorage
+    const STORAGE_KEY = 'vigi-29-56-v1';
+
+    // --- MAP ---
+    const map = L.map('map', { zoomControl: true }).setView([47.95, -3.3], 8);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+
+    let communeLayer; // L.GeoJSON group
+    let vigilance = {}; // { insee: level }
+    let byInsee = new Map(); // INSEE -> layer
+    let allFeatures = []; // keep features for search
+
+    const styleFor = (insee) => ({
+      color: '#111827', weight: 0.6, opacity: 0.8,
+      fillColor: COLORS[vigilance[insee] || 'vert'] || COLORS.vert,
+      fillOpacity: 0.6
+    });
+
+    const refreshStyles = () => {
+      communeLayer && communeLayer.eachLayer(l => l.setStyle(styleFor(getInsee(l.feature))));
+      updateCounts();
+    }
+
+    const updateCounts = () => {
+      const total = byInsee.size;
+      const counts = LEVELS.reduce((acc,k)=> (acc[k]=0,acc), {});
+      for(const [insee, lvl] of Object.entries(vigilance)) if(byInsee.has(insee)) counts[lvl] = (counts[lvl]||0)+1;
+      document.getElementById('communeCount').textContent = `${total} communes`;
+    }
+
+    const setLevel = (insee, level) => {
+      if(!LEVELS.includes(level)) return;
+      vigilance[insee] = level;
+      const layer = byInsee.get(insee);
+      if(layer) layer.setStyle(styleFor(insee));
+      document.getElementById('lastUpdate').textContent = 'Maj : ' + fmtDateTime();
+      // persist
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ vigilance, t: Date.now() }));
+      // side panel update if open on this commune
+      if(currentFeature && getInsee(currentFeature) === insee){
+        document.getElementById('pLevel').textContent = level;
+      }
+    }
+
+    // --- LOAD GEOJSON ---
+    async function loadGeo(path){
+      const r = await fetch(path);
+      if(!r.ok) throw new Error(`Échec de chargement: ${path}`);
+      return await r.json();
+    }
+
+    async function boot(){
+      try{
+        // TIP: Placez deux fichiers à côté de cette page :
+        //  - communes-29.geojson
+        //  - communes-56.geojson
+        // Vous pouvez les obtenir depuis data.gouv (contours des communes) et filtrer les départements 29 et 56.
+        const [g29, g56] = await Promise.all([
+          loadGeo('./communes-29.geojson'),
+          loadGeo('./communes-56.geojson')
+        ]);
+
+        const merged = { type:'FeatureCollection', features: [...g29.features, ...g56.features] };
+        allFeatures = merged.features;
+
+        communeLayer = L.geoJSON(merged, {
+          style: f => styleFor(getInsee(f)),
+          onEachFeature: (f, layer) => {
+            const insee = getInsee(f);
+            const nom = getName(f);
+            byInsee.set(insee, layer);
+            if(!vigilance[insee]) vigilance[insee] = 'vert';
+
+            layer.bindTooltip(`${nom} (${insee})`, { sticky:true });
+            layer.on('click', () => selectFeature(f));
+            layer.on('mouseover', () => layer.setStyle({ weight: 1.2 }));
+            layer.on('mouseout', () => layer.setStyle({ weight: 0.6 }));
+          }
+        }).addTo(map);
+
+        try{ // restore previous session
+          const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+          if(saved && saved.vigilance){
+            vigilance = Object.assign(vigilance, saved.vigilance);
+            refreshStyles();
+            document.getElementById('lastUpdate').textContent = 'Maj : ' + (saved.t ? fmtDateTime(new Date(saved.t)) : fmtDateTime());
+          }
+        } catch(e){}
+
+        updateCounts();
+        map.fitBounds(communeLayer.getBounds(), { padding: [20,20] });
+      } catch(e){
+        alert(e.message + "\n\nAstuce: ouvrez ce fichier via un petit serveur local (ex: `npx serve`) pour éviter les restrictions navigateur, et placez les deux fichiers GeoJSON à côté.");
+      }
+    }
+
+    // --- SIDE PANEL ---
+    let currentFeature = null;
+    const panel = document.getElementById('panel');
+    const openPanel = () => panel.hidden = false;
+    const closePanel = () => (panel.hidden = true, currentFeature=null);
+    document.getElementById('panelClose').onclick = closePanel;
+
+    function selectFeature(f){
+      currentFeature = f;
+      const insee = getInsee(f);
+      document.getElementById('panelTitle').textContent = getName(f);
+      document.getElementById('pInsee').textContent = insee;
+      document.getElementById('pNom').textContent = getName(f);
+      document.getElementById('pLevel').textContent = vigilance[insee] || 'vert';
+      openPanel();
+      const center = L.geoJSON(f).getBounds().getCenter();
+      map.flyTo(center, Math.max(map.getZoom(), 10));
+    }
+
+    document.querySelectorAll('.popup-actions button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(!currentFeature) return;
+        setLevel(getInsee(currentFeature), btn.dataset.level);
+        refreshStyles();
+      })
+    });
+
+    // --- SEARCH ---
+    function normalize(s){ return (s||'').toString().normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase(); }
+    document.getElementById('btnSearch').onclick = () => {
+      const q = normalize(document.getElementById('searchBox').value);
+      if(!q) return;
+      const f = allFeatures.find(f => normalize(getName(f)).includes(q));
+      if(f){
+        const l = byInsee.get(getInsee(f));
+        if(l){ l.fire('click'); }
+      } else { alert('Aucune commune trouvée pour: ' + q); }
+    }
+
+    // --- ACTIONS ---
+    document.getElementById('btnSetAllVert').onclick = () => {
+      byInsee.forEach((_, insee) => vigilance[insee] = 'vert');
+      refreshStyles();
+      document.getElementById('lastUpdate').textContent = 'Maj : ' + fmtDateTime();
+    };
+
+    document.getElementById('btnExport').onclick = () => {
+      const data = JSON.stringify({ updated: new Date().toISOString(), vigilance }, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = Object.assign(document.createElement('a'), { href:url, download:'vigilance-29-56.json' });
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    };
+
+    document.getElementById('fileImport').onchange = (ev) => {
+      const file = ev.target.files[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try{
+          const obj = JSON.parse(reader.result);
+          const data = obj.vigilance || obj; // accepte soit {vigilance:{}} soit dictionnaire direct
+          let changed = 0;
+          for(const [k,v] of Object.entries(data)){
+            if(LEVELS.includes(v)) { vigilance[k]=v; changed++; }
+          }
+          refreshStyles();
+          document.getElementById('lastUpdate').textContent = 'Maj : ' + fmtDateTime();
+          alert(`Import terminé: ${changed} communes mises à jour.`);
+        }catch(e){ alert('Fichier invalide.'); }
+      };
+      reader.readAsText(file);
+      ev.target.value = '';
+    };
+
+    document.getElementById('btnReset').onclick = () => {
+      if(confirm('Réinitialiser les niveaux et effacer la sauvegarde locale ?')){
+        vigilance = {};
+        byInsee.forEach((_, insee) => vigilance[insee] = 'vert');
+        localStorage.removeItem(STORAGE_KEY);
+        refreshStyles();
+        document.getElementById('lastUpdate').textContent = 'Maj : —';
+      }
+    };
+
+    // GO
+    boot();
+  </script>
+
+  <!-- 
+  =====================
+  COMMENT OBTENIR LES GEOJSON ?
+  =====================
+  1) Télécharger "Contours des communes" (format GeoJSON) sur data.gouv.fr.
+     Exemple de jeu de données : https://www.data.gouv.fr/fr/datasets/contours-des-communes-de-france/
+  2) Filtrer les communes dont le code département est 29 ou 56.
+     - Beaucoup de fichiers ont un champ "code" (INSEE à 5 chiffres) : le département = les 2 premiers chiffres.
+     - Vous pouvez filtrer avec mapshaper en ligne : https://mapshaper.org/
+       * Importer le GeoJSON complet
+       * Ouvrir la console (Tools > Console) et exécuter :
+         filter substr(code,0,2) == '29' || substr(code,0,2) == '56'
+       * Exporter deux fichiers séparés (ou un seul avec les deux départements) : communes-29.geojson et communes-56.geojson
+  3) Placer les fichiers à côté de ce HTML et ouvrir via un petit serveur local pour éviter les erreurs CORS :
+       - Avec Node.js : `npx serve` (puis ouvrir l’URL indiquée)
+       - Ou via VS Code Live Server, ou Python : `python3 -m http.server`
+  4) Pour publier gratuitement :
+       - Déposer ce HTML + les 2 GeoJSON sur un dépôt GitHub
+       - Activer GitHub Pages (branche `main`, dossier `/root`)
+       - L’URL sera publique et gratuite.
+  Astuce : le JSON d’export pourra être lu par un autre site/appli pour afficher la même vigilance ailleurs.
+  -->
+</body>
+</html>
